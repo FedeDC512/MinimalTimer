@@ -4,8 +4,8 @@ import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,12 +28,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.minimaltimer.ui.theme.MinimalTimerTheme
 import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
@@ -54,55 +58,33 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun Timer(){
-    var timeInput by remember {
-        mutableStateOf(0L)
-    }
+    var minutesInput by remember { mutableStateOf("") }
+    var secondsInput by remember { mutableStateOf("") }
+    val focusRequesterMinutes = remember { FocusRequester() }
+    val focusRequesterSeconds = remember { FocusRequester() }
+    var minutesClicked by remember { mutableStateOf(false) }
 
-    var minutesInput by remember {
-        mutableStateOf("")
-    }
-
-    var secondsInput by remember {
-        mutableStateOf("")
-    }
-
-    var count by remember {
-        mutableStateOf(0)
-    }
-
-    var time by remember {
-        mutableStateOf(timeInput)
-    }
-
-    var isRunning by remember {
-        mutableStateOf(false)
-    }
-
-    var startTime by remember {
-        mutableStateOf(0L)
-    }
-
+    var time by remember { mutableStateOf(0L) }
+    var isRunning by remember { mutableStateOf(false) }
     var isDialogOpen by remember { mutableStateOf(false) }
 
-    fun showDialog() {
-        isDialogOpen = true
-    }
-
-    fun hideDialog() {
-        isDialogOpen = false
-    }
-    
-    val context = LocalContext.current
+    fun showDialog() { isDialogOpen = true }
+    fun hideDialog() { isDialogOpen = false }
 
     val keyboardController = LocalSoftwareKeyboardController.current
 
     Box(modifier = Modifier
         .fillMaxSize()
         .clickable {
-            count++
+            if (isRunning) {
+                time = 0L
+                isRunning = false
+            } else if (time != 0L) {
+                isRunning = true
+                keyboardController?.hide()
+            }
         },
     ){
-        Text(text = count.toString())
         Column (
             modifier = Modifier
                 .align(Alignment.Center)
@@ -111,35 +93,63 @@ fun Timer(){
             Row {
                 Spacer(modifier = Modifier.weight(1f))
                 Box (modifier = Modifier
-                    .background(Color.Yellow)
-                    .clickable { showDialog() },
+                    //.background(Color.Yellow)
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            val boxWidth = size.width
+                            if (offset.x < boxWidth / 2) {
+                                minutesClicked = true
+                                showDialog()
+                            } else {
+                                minutesClicked = false
+                                showDialog()
+                            }
+                        }
+                    }
                 ) {
                     Text(
                         text = formatTime(timeInMillis = time),
-                        style = MaterialTheme.typography.headlineLarge
+                        //style = MaterialTheme.typography.headlineLarge,
+                        fontSize = 90.sp
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(100.dp))
 
             Row {
                 Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    text = if (time == 0L && !isRunning) "Tap the clock\nto set your timer"
+                    else if (isRunning) "Tap anywhere\nto reset the timer"
+                    else "Tap anywhere\nto start the timer",
+                    /* buildAnnotatedString {
+                        if (time == 0L) {
+                            withStyle(style = SpanStyle(color = Color.Gray)) {
+                                append("Click the clock to\n")
+                            }
+                            withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                                append("set the timer")
+                            }
+                        } else {
+                            withStyle(style = SpanStyle(color = Color.Gray)) {
+                                append("Click anywhere to\n")
+                            }
+                            withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                                append( if (isRunning) "reset" else "start")
+                            }
+                        }
+                    }, */
 
-                Button(onClick = {
-                    if (isRunning) {
-                        time = 0L
-                        isRunning = false
-                    } else if (time != 0L) {
-                        startTime = System.currentTimeMillis() - time
-                        isRunning = true
-                        keyboardController?.hide()
-                    }
-                    }) {
-                        Text(text = if (isRunning) "Reset" else "Start", color = MaterialTheme.colorScheme.surface)
-                }
+                    color = Color.LightGray,
+                    fontSize = 30.sp,
+                    textAlign = TextAlign.Center,
+                    style = TextStyle(
+                        lineHeight = 35.sp
+                    ),
 
+                )
                 Spacer(modifier = Modifier.weight(1f))
             }
         }
@@ -155,6 +165,10 @@ fun Timer(){
 
     // Finestra di dialogo
     if (isDialogOpen) {
+
+        minutesInput = ""
+        secondsInput = ""
+
         AlertDialog(
             onDismissRequest = { hideDialog() },
             title = { Text("Enter Time") },
@@ -170,6 +184,7 @@ fun Timer(){
                         modifier = Modifier
                             .width(80.dp)
                             .padding(8.dp)
+                            .focusRequester(focusRequesterMinutes)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
 
@@ -183,6 +198,7 @@ fun Timer(){
                         modifier = Modifier
                             .width(80.dp)
                             .padding(8.dp)
+                            .focusRequester(focusRequesterSeconds)
                     )
                 }
             },
@@ -198,11 +214,27 @@ fun Timer(){
                 }
             },
             dismissButton = {
-                Button(onClick = { hideDialog() }) {
+                Button(
+                    onClick = {
+                        hideDialog()
+                        if (time == 0L) { isRunning = false }
+                    }) {
                     Text("Cancel")
                 }
             }
         )
+    }
+
+    LaunchedEffect(isDialogOpen) {
+        if (isDialogOpen) {
+            if (minutesClicked) {
+                focusRequesterMinutes.requestFocus()
+                keyboardController?.show()
+            } else {
+                focusRequesterSeconds.requestFocus()
+                keyboardController?.show()
+            }
+        }
     }
 
 }

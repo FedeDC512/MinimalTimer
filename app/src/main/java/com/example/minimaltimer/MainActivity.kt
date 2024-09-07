@@ -51,8 +51,30 @@ import androidx.core.app.NotificationManagerCompat
 import com.example.minimaltimer.ui.theme.MinimalTimerTheme
 import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
+import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
+
+    private val requestNotificationPermissionLauncher: ActivityResultLauncher<String> =
+        registerForActivityResult(RequestPermission()) { isGranted: Boolean ->
+            if (isGranted) {
+                Toast.makeText(this, "Notification permission granted", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Notification permission denied", Toast.LENGTH_SHORT).show()
+                /* Directs the user to the app settings to enable permission
+                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                }
+                startActivity(intent)*/
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -61,6 +83,13 @@ class MainActivity : ComponentActivity() {
                     Timer()
                 }
             }
+        }
+        if (ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }

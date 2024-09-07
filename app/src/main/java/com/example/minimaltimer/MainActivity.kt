@@ -1,6 +1,12 @@
 package com.example.minimaltimer
 
+import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.res.Configuration
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -32,6 +38,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
@@ -39,6 +46,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.example.minimaltimer.ui.theme.MinimalTimerTheme
 import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
@@ -73,17 +82,23 @@ fun Timer(){
 
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .clickable {
-            if (isRunning) {
-                time = 0L
-                isRunning = false
-            } else if (time != 0L) {
-                isRunning = true
-                keyboardController?.hide()
-            }
-        },
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        createNotificationChannel(context)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable {
+                if (isRunning) {
+                    time = 0L
+                    isRunning = false
+                } else if (time != 0L) {
+                    isRunning = true
+                    keyboardController?.hide()
+                }
+            },
     ){
         Column (
             modifier = Modifier
@@ -159,11 +174,16 @@ fun Timer(){
         while (isRunning){
             delay(1000)
             time -= 1000
+
+            if(time == 0L) sendNotification(context)
+            if(time < -3_600_000){ //If the timer is running for more than an hour, it resets to 0
+                isRunning = false
+                time = 0
+            }
         }
 
     }
 
-    // Finestra di dialogo
     if (isDialogOpen) {
 
         minutesInput = ""
@@ -239,12 +259,56 @@ fun Timer(){
 
 }
 
+fun createNotificationChannel(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val name = "Timer Channel"
+        val descriptionText = "Channel for Timer Notifications"
+        val importance = NotificationManager.IMPORTANCE_HIGH
+        val channel = NotificationChannel("TIMER_CHANNEL_ID", name, importance).apply {
+            description = descriptionText
+        }
+
+        val notificationManager: NotificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+}
+
+@SuppressLint("MissingPermission")
+fun sendNotification(context: Context) {
+    val customSoundUri: Uri = Uri.parse("android.resource://${context.packageName}/${R.raw.mario_coin_sound}")
+
+    val notificationBuilder = NotificationCompat.Builder(context, "TIMER_CHANNEL_ID")
+        .setSmallIcon(R.drawable.fede)
+        .setContentTitle("Timer Finished")
+        .setContentText("Your timer has finished!")
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setSound(customSoundUri)
+        .setDefaults(NotificationCompat.DEFAULT_VIBRATE) // Optional vibration
+
+    with(NotificationManagerCompat.from(context)) {
+        notify(1, notificationBuilder.build())
+    }
+}
+
 @Composable
 fun formatTime(timeInMillis: Long): String {
     val minutes = TimeUnit.MILLISECONDS.toMinutes(timeInMillis)
     val seconds = TimeUnit.MILLISECONDS.toSeconds(timeInMillis) % 60
 
-    return String.format("%02d:%02d", minutes, seconds)
+    var formattedMinutes = String.format("%02d", minutes)
+    var formattedSeconds = String.format("%02d", seconds)
+    if (seconds > -10 && seconds < 0) formattedSeconds = "0$formattedSeconds"
+    if (minutes > -10 && minutes < 0) formattedMinutes = "0$formattedMinutes"
+
+    var formattedTime = "$formattedMinutes:$formattedSeconds"
+
+    return if (formattedTime.contains("-")) {
+        val cleanedTime = formattedTime.replace("-", "")
+        "-$cleanedTime"
+    } else {
+        formattedTime
+    }
 }
 
 fun parseTimeToMillis(minutes: String, seconds: String): Long {
@@ -252,6 +316,7 @@ fun parseTimeToMillis(minutes: String, seconds: String): Long {
     val secondsValue = seconds.toIntOrNull() ?: 0
     return TimeUnit.MINUTES.toMillis(minutesValue.toLong()) + TimeUnit.SECONDS.toMillis(secondsValue.toLong())
 }
+
 @Preview(name = "Light Mode")
 @Preview(
     uiMode = Configuration.UI_MODE_NIGHT_YES,

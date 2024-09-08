@@ -4,9 +4,12 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -17,6 +20,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,6 +43,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,9 +88,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MinimalTimerTheme {
+            val isDarkTheme = isSystemInDarkTheme()
+            val darkThemeState = remember { mutableStateOf(isDarkTheme) }
+
+            MinimalTimerTheme(darkTheme = darkThemeState.value) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    Timer()
+                    Timer(darkThemeState)
                 }
             }
         }
@@ -100,14 +108,12 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Timer(){
+fun Timer(darkThemeState: MutableState<Boolean>){
     var minutesInput by remember { mutableStateOf("") }
     var secondsInput by remember { mutableStateOf("") }
     val focusRequesterMinutes = remember { FocusRequester() }
     val focusRequesterSeconds = remember { FocusRequester() }
     var minutesClicked by remember { mutableStateOf(false) }
-    var isDarkTheme by remember { mutableStateOf(false) }
-    //var isDarkTheme by remember { mutableStateOf(MaterialTheme.colorScheme.isLight.not()) }
 
     var startTime by remember { mutableStateOf(0L) }
     var time by remember { mutableStateOf(startTime) }
@@ -388,9 +394,9 @@ fun Timer(){
                         verticalAlignment = Alignment.CenterVertically
                     ){
                         Switch(
-                            checked = isDarkTheme,
+                            checked = darkThemeState.value,
                             onCheckedChange = { isChecked ->
-                                isDarkTheme = isChecked
+                                darkThemeState.value = isChecked
                             }
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -417,12 +423,21 @@ fun Timer(){
 }
 
 fun createNotificationChannel(context: Context) {
+    val audioAttributes = AudioAttributes.Builder()
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+        .build()
+
+    val sound = Uri.parse("android.resource://${context.packageName}/raw/${R.raw.notification_sound}")
+
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val name = "Timer Channel"
         val descriptionText = "Channel for Timer Notifications"
         val importance = NotificationManager.IMPORTANCE_HIGH
         val channel = NotificationChannel("TIMER_CHANNEL_ID", name, importance).apply {
             description = descriptionText
+            setSound((sound),audioAttributes)
         }
 
         val notificationManager: NotificationManager =
@@ -433,15 +448,21 @@ fun createNotificationChannel(context: Context) {
 
 @SuppressLint("MissingPermission")
 fun sendNotification(context: Context) {
-    val customSoundUri: Uri = Uri.parse("android.resource://${context.packageName}/${R.raw.mario_coin_sound}")
+    // Create an explicit intent for an Activity in your app.
+    val intent = Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP // Does not recreate the activity if it is already running
+    }
+    val pendingIntent: PendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
     val notificationBuilder = NotificationCompat.Builder(context, "TIMER_CHANNEL_ID")
-        .setSmallIcon(R.drawable.fede)
+        .setSmallIcon(R.drawable.notification_icon)
         .setContentTitle("Timer Finished")
         .setContentText("Your timer has finished!")
         .setPriority(NotificationCompat.PRIORITY_HIGH)
-        .setSound(customSoundUri)
-        .setDefaults(NotificationCompat.DEFAULT_VIBRATE) // Optional vibration
+        .setCategory(NotificationCompat.CATEGORY_ALARM)
+        .setContentIntent(pendingIntent)
+        .setAutoCancel(true)
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
     with(NotificationManagerCompat.from(context)) {
         notify(1, notificationBuilder.build())
@@ -475,6 +496,7 @@ fun parseTimeToMillis(minutes: String, seconds: String): Long {
     return TimeUnit.MINUTES.toMillis(minutesValue.toLong()) + TimeUnit.SECONDS.toMillis(secondsValue.toLong())
 }
 
+@SuppressLint("UnrememberedMutableState")
 @Preview(name = "Light Mode")
 @Preview(
     uiMode = Configuration.UI_MODE_NIGHT_YES,
@@ -483,9 +505,9 @@ fun parseTimeToMillis(minutes: String, seconds: String): Long {
 )
 @Composable
 fun GreetingPreview() {
-    MinimalTimerTheme {
+    MinimalTimerTheme(darkTheme = true) {
         Surface(modifier = Modifier.fillMaxSize()) {
-            Timer()
+            Timer(mutableStateOf(true))
         }
     }
 }

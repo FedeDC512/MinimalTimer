@@ -1,15 +1,20 @@
 package com.example.minimaltimer
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -19,12 +24,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,16 +59,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.example.minimaltimer.ui.theme.MinimalTimerTheme
 import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.provider.Settings
-import android.widget.Toast
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
-import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
 
@@ -86,10 +91,10 @@ class MainActivity : ComponentActivity() {
         }
         if (ContextCompat.checkSelfPermission(
                 this,
-                android.Manifest.permission.POST_NOTIFICATIONS
+                Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            requestNotificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }
@@ -101,13 +106,21 @@ fun Timer(){
     val focusRequesterMinutes = remember { FocusRequester() }
     val focusRequesterSeconds = remember { FocusRequester() }
     var minutesClicked by remember { mutableStateOf(false) }
+    var isDarkTheme by remember { mutableStateOf(false) }
+    //var isDarkTheme by remember { mutableStateOf(MaterialTheme.colorScheme.isLight.not()) }
 
-    var time by remember { mutableStateOf(0L) }
+    var startTime by remember { mutableStateOf(0L) }
+    var time by remember { mutableStateOf(startTime) }
+
+
     var isRunning by remember { mutableStateOf(false) }
-    var isDialogOpen by remember { mutableStateOf(false) }
+    var isTimerDialogOpen by remember { mutableStateOf(false) }
+    var isSettingsDialogOpen by remember { mutableStateOf(false) }
 
-    fun showDialog() { isDialogOpen = true }
-    fun hideDialog() { isDialogOpen = false }
+    fun showDialog() { isTimerDialogOpen = true }
+    fun hideDialog() { isTimerDialogOpen = false }
+    fun showSettingsDialog() { isSettingsDialogOpen = true }
+    fun hideSettingsDialog() { isSettingsDialogOpen = false }
 
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -121,7 +134,7 @@ fun Timer(){
             .fillMaxSize()
             .clickable {
                 if (isRunning) {
-                    time = 0L
+                    time = startTime
                     isRunning = false
                 } else if (time != 0L) {
                     isRunning = true
@@ -197,6 +210,26 @@ fun Timer(){
                 Spacer(modifier = Modifier.weight(1f))
             }
         }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = "Settings",
+                modifier = Modifier
+                    .size(45.dp)
+                    .align(Alignment.TopEnd)
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            showSettingsDialog()
+                        }
+                    },
+                tint = Color.LightGray
+            )
+        }
     }
 
     LaunchedEffect(isRunning) {
@@ -207,14 +240,13 @@ fun Timer(){
             if(time == 0L) sendNotification(context)
             if(time < -3_600_000){ //If the timer is running for more than an hour, it resets to 0
                 isRunning = false
-                time = 0
+                time = startTime
             }
         }
 
     }
 
-    if (isDialogOpen) {
-
+    if (isTimerDialogOpen) {
         minutesInput = ""
         secondsInput = ""
 
@@ -236,7 +268,6 @@ fun Timer(){
                             .focusRequester(focusRequesterMinutes)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-
                     OutlinedTextField(
                         value = secondsInput,
                         onValueChange = { newValue ->
@@ -256,6 +287,7 @@ fun Timer(){
                     onClick = {
                         hideDialog()
                         isRunning = false
+                        startTime = 0
                         time = parseTimeToMillis(minutesInput, secondsInput)
                     }
                 ) {
@@ -274,8 +306,8 @@ fun Timer(){
         )
     }
 
-    LaunchedEffect(isDialogOpen) {
-        if (isDialogOpen) {
+    LaunchedEffect(isTimerDialogOpen) {
+        if (isTimerDialogOpen) {
             if (minutesClicked) {
                 focusRequesterMinutes.requestFocus()
                 keyboardController?.show()
@@ -284,6 +316,102 @@ fun Timer(){
                 keyboardController?.show()
             }
         }
+    }
+
+    if (isSettingsDialogOpen) {
+        minutesInput = ""
+        secondsInput = ""
+
+        AlertDialog(
+            onDismissRequest = { isSettingsDialogOpen = false },
+            title = { Text("Settings") },
+            text = {
+                Column(modifier = Modifier.padding(16.dp)) {
+
+                    Text(
+                        text = "Custom Time",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Set a personalized time, and the timer will automatically reset to this value when restarted.\nCurrent custom time: ${formatTime(startTime)}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Row {
+                        OutlinedTextField(
+                            value = minutesInput,
+                            onValueChange = { newValue ->
+                                minutesInput = newValue
+                            },
+                            label = { Text("mm") },
+                            keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
+                            modifier = Modifier
+                                .width(80.dp)
+                                .padding(4.dp)
+                                .focusRequester(focusRequesterMinutes)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = secondsInput,
+                            onValueChange = { newValue ->
+                                secondsInput = newValue
+                            },
+                            label = { Text("ss") },
+                            keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
+                            modifier = Modifier
+                                .width(80.dp)
+                                .padding(4.dp)
+                                .focusRequester(focusRequesterSeconds)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            startTime = parseTimeToMillis(minutesInput, secondsInput)
+                            time = startTime
+                        },
+                    ) {
+                        Text(
+                            text = "Set Custom Time",
+                            fontSize = 15.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = "Theme",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ){
+                        Switch(
+                            checked = isDarkTheme,
+                            onCheckedChange = { isChecked ->
+                                isDarkTheme = isChecked
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Light / Dark",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        hideSettingsDialog()
+                    }
+                ) {
+                    Text("Close")
+                }
+            }
+        )
     }
 
 }
@@ -320,6 +448,7 @@ fun sendNotification(context: Context) {
     }
 }
 
+@SuppressLint("DefaultLocale")
 @Composable
 fun formatTime(timeInMillis: Long): String {
     val minutes = TimeUnit.MILLISECONDS.toMinutes(timeInMillis)
@@ -330,7 +459,7 @@ fun formatTime(timeInMillis: Long): String {
     if (seconds > -10 && seconds < 0) formattedSeconds = "0$formattedSeconds"
     if (minutes > -10 && minutes < 0) formattedMinutes = "0$formattedMinutes"
 
-    var formattedTime = "$formattedMinutes:$formattedSeconds"
+    val formattedTime = "$formattedMinutes:$formattedSeconds"
 
     return if (formattedTime.contains("-")) {
         val cleanedTime = formattedTime.replace("-", "")

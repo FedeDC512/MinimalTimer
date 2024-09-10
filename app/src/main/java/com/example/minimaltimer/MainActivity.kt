@@ -449,21 +449,13 @@ fun Timer(darkThemeState: MutableState<Boolean>){
 }
 
 fun createNotificationChannel(context: Context) {
-    val audioAttributes = AudioAttributes.Builder()
-        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-        .build()
-
-    val sound = Uri.parse("android.resource://${context.packageName}/raw/${R.raw.notification_sound}")
-
-
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val name = "Timer Channel"
         val descriptionText = "Channel for Timer Notifications"
         val importance = NotificationManager.IMPORTANCE_HIGH
         val channel = NotificationChannel("TIMER_CHANNEL_ID", name, importance).apply {
             description = descriptionText
-            setSound((sound),audioAttributes)
+            setSound(null, null)
         }
 
         val notificationManager: NotificationManager =

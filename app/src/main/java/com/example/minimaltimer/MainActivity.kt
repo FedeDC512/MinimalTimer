@@ -2,21 +2,26 @@ package com.example.minimaltimer
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -85,6 +90,15 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    private val requestExactAlarmPermissionLauncher: ActivityResultLauncher<Intent> =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            /*if (result.resultCode == RESULT_OK) {
+                Toast.makeText(this, "Exact alarm permission granted", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Exact alarm permission denied", Toast.LENGTH_SHORT).show()
+            }*/
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -97,12 +111,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) {
             requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            if (!alarmManager.canScheduleExactAlarms()) {
+                val intent = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                requestExactAlarmPermissionLauncher.launch(intent)
+            }
         }
     }
 }
@@ -145,6 +168,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
                 } else if (time != 0L) {
                     isRunning = true
                     keyboardController?.hide()
+                    setAlarm(context, time)
                 }
             },
     ){
@@ -243,7 +267,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
             delay(1000)
             time -= 1000
 
-            if(time == 0L) sendNotification(context)
+            if(time == 0L) //setAlarm(context) //sendNotification(context)
             if(time < -3_600_000){ //If the timer is running for more than an hour, it resets to 0
                 isRunning = false
                 time = startTime
@@ -389,7 +413,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
                         text = "Theme",
                         style = MaterialTheme.typography.titleMedium
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ){
@@ -489,6 +513,49 @@ fun formatTime(timeInMillis: Long): String {
         formattedTime
     }
 }
+
+class AlarmReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        Toast.makeText(context, "Your timer has finished!", Toast.LENGTH_SHORT).show()
+
+        val soundUri = Uri.parse("android.resource://${context.packageName}/raw/${R.raw.notification_sound}")
+
+        val mediaPlayer = MediaPlayer().apply {
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .build()
+            )
+            setDataSource(context, soundUri)
+            prepare()
+            start()
+        }
+
+        mediaPlayer.setOnCompletionListener {
+            it.release()
+        }
+    }
+}
+
+fun setAlarm(context: Context, timeInMillis: Long) {
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    val intent = Intent(context, AlarmReceiver::class.java)
+    val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    val triggerTime = System.currentTimeMillis() + timeInMillis
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (alarmManager.canScheduleExactAlarms()) {
+            alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+        } else {
+            Toast.makeText(context, "Permission to set exact alarms is required", Toast.LENGTH_SHORT).show()
+        }
+    } else {
+        alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+    }
+}
+
 
 fun parseTimeToMillis(minutes: String, seconds: String): Long {
     val minutesValue = minutes.toIntOrNull() ?: 0

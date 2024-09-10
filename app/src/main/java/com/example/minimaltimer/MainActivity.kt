@@ -16,7 +16,6 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -165,6 +164,8 @@ fun Timer(darkThemeState: MutableState<Boolean>){
                 if (isRunning) {
                     time = startTime
                     isRunning = false
+                    cancelAlarm(context)
+                    removeNotification(context)
                 } else if (time != 0L) {
                     isRunning = true
                     keyboardController?.hide()
@@ -266,6 +267,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
         while (isRunning){
             delay(1000)
             time -= 1000
+            updateCountdownNotification(context, time)
 
             if(time == 0L) //setAlarm(context) //sendNotification(context)
             if(time < -3_600_000){ //If the timer is running for more than an hour, it resets to 0
@@ -471,21 +473,24 @@ fun createNotificationChannel(context: Context) {
 }
 
 @SuppressLint("MissingPermission")
-fun sendNotification(context: Context) {
-    // Create an explicit intent for an Activity in your app.
+fun updateCountdownNotification(context: Context, timeRemaining: Long) {
+    val timeFormatted = formatTime(timeRemaining)
+
     val intent = Intent(context, MainActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_SINGLE_TOP // Does not recreate the activity if it is already running
     }
-    val pendingIntent: PendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+    val pendingIntent: PendingIntent = PendingIntent.getActivity(
+        context, 0, intent, PendingIntent.FLAG_IMMUTABLE
+    )
 
     val notificationBuilder = NotificationCompat.Builder(context, "TIMER_CHANNEL_ID")
         .setSmallIcon(R.drawable.notification_icon)
-        .setContentTitle("Timer Finished")
-        .setContentText("Your timer has finished!")
+        .setContentTitle("Timer")
+        .setContentText("Remaining time: $timeFormatted")
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setCategory(NotificationCompat.CATEGORY_ALARM)
         .setContentIntent(pendingIntent)
-        .setAutoCancel(true)
+        .setOngoing(true)
         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
     with(NotificationManagerCompat.from(context)) {
@@ -493,8 +498,12 @@ fun sendNotification(context: Context) {
     }
 }
 
+fun removeNotification(context: Context) {
+    val notificationManager = NotificationManagerCompat.from(context)
+    notificationManager.cancel(1)
+}
+
 @SuppressLint("DefaultLocale")
-@Composable
 fun formatTime(timeInMillis: Long): String {
     val minutes = TimeUnit.MILLISECONDS.toMinutes(timeInMillis)
     val seconds = TimeUnit.MILLISECONDS.toSeconds(timeInMillis) % 60
@@ -539,6 +548,7 @@ class AlarmReceiver : BroadcastReceiver() {
 }
 
 fun setAlarm(context: Context, timeInMillis: Long) {
+    cancelAlarm(context)
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     val intent = Intent(context, AlarmReceiver::class.java)
     val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -554,6 +564,14 @@ fun setAlarm(context: Context, timeInMillis: Long) {
     } else {
         alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
     }
+}
+
+fun cancelAlarm(context: Context) {
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    val intent = Intent(context, AlarmReceiver::class.java)
+    val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    alarmManager.cancel(pendingIntent)
 }
 
 

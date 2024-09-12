@@ -6,6 +6,7 @@ import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -16,6 +17,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -111,6 +113,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        startService(Intent(this, AlarmService::class.java))
+
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.POST_NOTIFICATIONS
@@ -127,6 +131,27 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        cancelAlarm(this)
+        removeNotification(this)
+
+        super.onDestroy()
+    }
+}
+
+class AlarmService : Service() {
+    override fun onBind(intent: Intent?): IBinder? {
+        return null
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent) {
+        cancelAlarm(this)
+        removeNotification(this)
+
+        super.onTaskRemoved(rootIntent)
+    }
+
 }
 
 @Composable

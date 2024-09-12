@@ -3,6 +3,7 @@ package com.example.minimaltimer
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlarmManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -17,6 +18,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.os.IBinder
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -72,8 +74,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.example.minimaltimer.ui.theme.MinimalTimerTheme
-import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
+import kotlin.math.absoluteValue
 
 class MainActivity : ComponentActivity() {
 
@@ -111,9 +113,13 @@ class MainActivity : ComponentActivity() {
                     Timer(darkThemeState)
                 }
             }
+
         }
 
-        startService(Intent(this, AlarmService::class.java))
+        val serviceIntent = Intent(this, TimerForegroundService::class.java)
+        serviceIntent.putExtra("time_in_millis", 10*60000L) // Pass the time (e.g. 1 minute)
+        startForegroundService(serviceIntent)
+        //stopService(Intent(this, TimerForegroundService::class.java))
 
         if (ContextCompat.checkSelfPermission(
                 this,
@@ -133,26 +139,147 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        cancelAlarm(this)
-        removeNotification(this)
+        val intent = Intent(this, TimerForegroundService::class.java)
+        intent.action = "END_TIMER"
+        this.startService(intent)
 
         super.onDestroy()
     }
 }
 
-class AlarmService : Service() {
+class TimerForegroundService : Service() {
+
+    private lateinit var timer: CountDownTimer
+    private val CHANNEL_ID = "TimerNotificationChannel"
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        /* Start the timer with the time passed from the Intent
+        val timeInMillis = intent?.getLongExtra("time_in_millis", 60000L) ?: 60000L
+        startForeground(1, createNotification("Starting timer..."))
+
+        startTimer(timeInMillis)*/
+        val action = intent?.action
+
+        if (action == "START_TIMER") {
+            val timerDuration = intent.getLongExtra("TIMER_DURATION", 60000L)
+            setAlarm(timerDuration)
+        } else if (action == "END_TIMER") {
+            cancelAlarm()
+        }
+
+        return START_STICKY // Ensure the service stays alive
+    }
+
     override fun onBind(intent: Intent?): IBinder? {
-        return null
+        return null // We are not binding this service to an activity
+    }
+
+    private fun startTimer(timeInMillis: Long) {
+        val maxNegativeTime = -60 * 60 * 1000L // -60 minuti in millisecondi
+
+        timer = object : CountDownTimer(timeInMillis, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                if (millisUntilFinished > 0) {
+                    // Update notification with remaining positive time
+                    updateNotification("Time remaining: ${formatTime(millisUntilFinished)}")
+                } else {
+                    // Update notification with negative time
+                    val negativeTime = millisUntilFinished.coerceAtLeast(maxNegativeTime)
+                    updateNotification("Time over: ${formatTime(negativeTime)}")
+                }
+            }
+
+            override fun onFinish() {
+                // Handle timer finish by continuing the count in negative
+                object : CountDownTimer(maxNegativeTime.absoluteValue, 1000) {
+                    override fun onTick(millisUntilFinished: Long) {
+                        val negativeMillis = -millisUntilFinished
+                        updateNotification("Time over: ${negativeMillis / 1000} seconds, ${formatTime(negativeMillis)}")
+                    }
+
+                    override fun onFinish() {
+                        // Stop after reaching -60 minutes
+                        updateNotification("Timer stopped at -60 minutes.")
+                        stopSelf()
+                    }
+                }.start()
+            }
+        }.start()
+    }
+
+    private fun createNotification(contentText: String): Notification {
+        val notificationIntent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Timer")
+            .setContentText(contentText)
+            .setSmallIcon(R.drawable.notification_icon)
+            .setContentIntent(pendingIntent)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+    }
+
+    private fun updateNotification(contentText: String) {
+        val notification = createNotification(contentText)
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager?.notify(1, notification)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cancelAlarm()
+    }
+
+    fun setAlarm(timeInMillis: Long) {
+        cancelAlarm()
+
+        val serviceIntent = Intent(this, TimerForegroundService::class.java)
+        serviceIntent.putExtra("time_in_millis", timeInMillis)
+        startForegroundService(serviceIntent)
+
+        startTimer(timeInMillis)
+
+        val alarmManager = this.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, AlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        val triggerTime = System.currentTimeMillis() + timeInMillis
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (alarmManager.canScheduleExactAlarms()) {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+            } else {
+                Toast.makeText(this, "Permission to set exact alarms is required", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+        }
+    }
+
+    fun cancelAlarm() {
+        if (::timer.isInitialized) {
+            timer.cancel()
+        }
+
+        val alarmManager = this.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, AlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        alarmManager.cancel(pendingIntent)
+
+        val notificationManager = NotificationManagerCompat.from(this)
+        notificationManager.cancel(1)
     }
 
     override fun onTaskRemoved(rootIntent: Intent) {
-        cancelAlarm(this)
-        removeNotification(this)
+        cancelAlarm()
 
         super.onTaskRemoved(rootIntent)
     }
-
 }
+
 
 @Composable
 fun Timer(darkThemeState: MutableState<Boolean>){
@@ -163,7 +290,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
     var minutesClicked by remember { mutableStateOf(false) }
 
     var startTime by remember { mutableStateOf(0L) }
-    var time by remember { mutableStateOf(startTime) }
+    var uiTime by remember { mutableStateOf(startTime) }
 
 
     var isRunning by remember { mutableStateOf(false) }
@@ -178,6 +305,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
     val keyboardController = LocalSoftwareKeyboardController.current
 
     val context = LocalContext.current
+
     LaunchedEffect(Unit) {
         createNotificationChannel(context)
     }
@@ -187,14 +315,21 @@ fun Timer(darkThemeState: MutableState<Boolean>){
             .fillMaxSize()
             .clickable {
                 if (isRunning) {
-                    time = startTime
+                    uiTime = startTime
                     isRunning = false
-                    cancelAlarm(context)
-                    removeNotification(context)
-                } else if (time != 0L) {
+
+                    val intent = Intent(context, TimerForegroundService::class.java)
+                    intent.action = "END_TIMER"
+                    context.startService(intent)
+
+                } else if (uiTime != 0L) {
                     isRunning = true
                     keyboardController?.hide()
-                    setAlarm(context, time)
+
+                    val intent = Intent(context, TimerForegroundService::class.java)
+                    intent.action = "START_TIMER"
+                    intent.putExtra("TIMER_DURATION", uiTime)
+                    context.startService(intent)
                 }
             },
     ){
@@ -221,7 +356,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
                     }
                 ) {
                     Text(
-                        text = formatTime(timeInMillis = time),
+                        text = formatTime(timeInMillis = uiTime),
                         //style = MaterialTheme.typography.headlineLarge,
                         fontSize = 90.sp
                     )
@@ -234,7 +369,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
             Row {
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
-                    text = if (time == 0L && !isRunning) "Tap the clock\nto set your timer"
+                    text = if (uiTime == 0L && !isRunning) "Tap the clock\nto set your timer"
                     else if (isRunning) "Tap anywhere\nto reset the timer"
                     else "Tap anywhere\nto start the timer",
                     /* buildAnnotatedString {
@@ -262,7 +397,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
                         lineHeight = 35.sp
                     ),
 
-                )
+                    )
                 Spacer(modifier = Modifier.weight(1f))
             }
         }
@@ -288,20 +423,14 @@ fun Timer(darkThemeState: MutableState<Boolean>){
         }
     }
 
-    LaunchedEffect(isRunning) {
+    /*LaunchedEffect(isRunning) {
         while (isRunning){
             delay(1000)
-            time -= 1000
-            updateCountdownNotification(context, time)
-
-            if(time == 0L) //setAlarm(context) //sendNotification(context)
-            if(time < -3_600_000){ //If the timer is running for more than an hour, it resets to 0
-                isRunning = false
-                time = startTime
-            }
+            uiTime -= 1000
+            //updateCountdownNotification(context, time)
         }
 
-    }
+    }*/
 
     if (isTimerDialogOpen) {
         minutesInput = ""
@@ -345,7 +474,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
                         hideDialog()
                         isRunning = false
                         startTime = 0
-                        time = parseTimeToMillis(minutesInput, secondsInput)
+                        uiTime = parseTimeToMillis(minutesInput, secondsInput)
                     }
                 ) {
                     Text("Confirm")
@@ -355,7 +484,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
                 Button(
                     onClick = {
                         hideDialog()
-                        if (time == 0L) { isRunning = false }
+                        if (uiTime == 0L) { isRunning = false }
                     }) {
                     Text("Cancel")
                 }
@@ -425,7 +554,7 @@ fun Timer(darkThemeState: MutableState<Boolean>){
                     Button(
                         onClick = {
                             startTime = parseTimeToMillis(minutesInput, secondsInput)
-                            time = startTime
+                            uiTime = startTime
                         },
                     ) {
                         Text(
@@ -489,37 +618,6 @@ fun createNotificationChannel(context: Context) {
     }
 }
 
-@SuppressLint("MissingPermission")
-fun updateCountdownNotification(context: Context, timeRemaining: Long) {
-    val timeFormatted = formatTime(timeRemaining)
-
-    val intent = Intent(context, MainActivity::class.java).apply {
-        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP // Does not recreate the activity if it is already running
-    }
-    val pendingIntent: PendingIntent = PendingIntent.getActivity(
-        context, 0, intent, PendingIntent.FLAG_IMMUTABLE
-    )
-
-    val notificationBuilder = NotificationCompat.Builder(context, "TIMER_CHANNEL_ID")
-        .setSmallIcon(R.drawable.notification_icon)
-        .setContentTitle("Timer")
-        .setContentText("Remaining time: $timeFormatted")
-        .setPriority(NotificationCompat.PRIORITY_HIGH)
-        .setCategory(NotificationCompat.CATEGORY_ALARM)
-        .setContentIntent(pendingIntent)
-        .setOngoing(true)
-        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-
-    with(NotificationManagerCompat.from(context)) {
-        notify(1, notificationBuilder.build())
-    }
-}
-
-fun removeNotification(context: Context) {
-    val notificationManager = NotificationManagerCompat.from(context)
-    notificationManager.cancel(1)
-}
-
 @SuppressLint("DefaultLocale")
 fun formatTime(timeInMillis: Long): String {
     val minutes = TimeUnit.MILLISECONDS.toMinutes(timeInMillis)
@@ -538,6 +636,12 @@ fun formatTime(timeInMillis: Long): String {
     } else {
         formattedTime
     }
+}
+
+fun parseTimeToMillis(minutes: String, seconds: String): Long {
+    val minutesValue = minutes.toIntOrNull() ?: 0
+    val secondsValue = seconds.toIntOrNull() ?: 0
+    return TimeUnit.MINUTES.toMillis(minutesValue.toLong()) + TimeUnit.SECONDS.toMillis(secondsValue.toLong())
 }
 
 class AlarmReceiver : BroadcastReceiver() {
@@ -562,40 +666,6 @@ class AlarmReceiver : BroadcastReceiver() {
             it.release()
         }
     }
-}
-
-fun setAlarm(context: Context, timeInMillis: Long) {
-    cancelAlarm(context)
-    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    val intent = Intent(context, AlarmReceiver::class.java)
-    val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-    val triggerTime = System.currentTimeMillis() + timeInMillis
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        if (alarmManager.canScheduleExactAlarms()) {
-            alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
-        } else {
-            Toast.makeText(context, "Permission to set exact alarms is required", Toast.LENGTH_SHORT).show()
-        }
-    } else {
-        alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
-    }
-}
-
-fun cancelAlarm(context: Context) {
-    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    val intent = Intent(context, AlarmReceiver::class.java)
-    val pendingIntent = PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-
-    alarmManager.cancel(pendingIntent)
-}
-
-
-fun parseTimeToMillis(minutes: String, seconds: String): Long {
-    val minutesValue = minutes.toIntOrNull() ?: 0
-    val secondsValue = seconds.toIntOrNull() ?: 0
-    return TimeUnit.MINUTES.toMillis(minutesValue.toLong()) + TimeUnit.SECONDS.toMillis(secondsValue.toLong())
 }
 
 @SuppressLint("UnrememberedMutableState")

@@ -3,6 +3,7 @@ package com.example.minimaltimer
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlarmManager
+import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -26,6 +27,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
+import androidx.activity.viewModels
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -53,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -73,11 +77,15 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
 import com.example.minimaltimer.ui.theme.MinimalTimerTheme
 import java.util.concurrent.TimeUnit
 import kotlin.math.absoluteValue
 
 class MainActivity : ComponentActivity() {
+    private val timerViewModel: TimerViewModel by viewModels()
 
     private val requestNotificationPermissionLauncher: ActivityResultLauncher<String> =
         registerForActivityResult(RequestPermission()) { isGranted: Boolean ->
@@ -102,15 +110,17 @@ class MainActivity : ComponentActivity() {
             }*/
         }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             val isDarkTheme = isSystemInDarkTheme()
             val darkThemeState = remember { mutableStateOf(isDarkTheme) }
+            val timeLeft by timerViewModel.timeLeft.observeAsState(0L)
 
             MinimalTimerTheme(darkTheme = darkThemeState.value) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    Timer(darkThemeState)
+                    Timer(darkThemeState, timeLeft)
                 }
             }
 
@@ -147,11 +157,33 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+class TimerViewModel : ViewModel() {
+    private val _timeLeft = MutableLiveData<Long>()
+    val timeLeft: LiveData<Long> = _timeLeft
+
+    fun updateTime(millisUntilFinished: Long) {
+        _timeLeft.value = millisUntilFinished
+    }
+}
+
+class MinimalTimerApp : Application() {
+    val timerViewModel: TimerViewModel by lazy {
+        TimerViewModel()
+    }
+}
+
 class TimerForegroundService : Service() {
 
     private lateinit var timer: CountDownTimer
     private val CHANNEL_ID = "TimerNotificationChannel"
+    private lateinit var timerViewModel: TimerViewModel
 
+    override fun onCreate() {
+        super.onCreate()
+        timerViewModel = (application as MinimalTimerApp).timerViewModel
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         /* Start the timer with the time passed from the Intent
         val timeInMillis = intent?.getLongExtra("time_in_millis", 60000L) ?: 60000L
@@ -179,6 +211,7 @@ class TimerForegroundService : Service() {
 
         timer = object : CountDownTimer(timeInMillis, 1000) {
             override fun onTick(millisUntilFinished: Long) {
+                timerViewModel.updateTime(millisUntilFinished)
                 if (millisUntilFinished > 0) {
                     // Update notification with remaining positive time
                     updateNotification("Time remaining: ${formatTime(millisUntilFinished)}")
@@ -232,6 +265,7 @@ class TimerForegroundService : Service() {
         cancelAlarm()
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     fun setAlarm(timeInMillis: Long) {
         cancelAlarm()
 
@@ -282,7 +316,7 @@ class TimerForegroundService : Service() {
 
 
 @Composable
-fun Timer(darkThemeState: MutableState<Boolean>){
+fun Timer(darkThemeState: MutableState<Boolean>, timeLeft: Long){
     var minutesInput by remember { mutableStateOf("") }
     var secondsInput by remember { mutableStateOf("") }
     val focusRequesterMinutes = remember { FocusRequester() }
@@ -679,7 +713,7 @@ class AlarmReceiver : BroadcastReceiver() {
 fun GreetingPreview() {
     MinimalTimerTheme(darkTheme = true) {
         Surface(modifier = Modifier.fillMaxSize()) {
-            Timer(mutableStateOf(true))
+            Timer(mutableStateOf(true), 60000L)
         }
     }
 }
